@@ -10,17 +10,21 @@
     .globl __restore
     .align 2
 __alltraps:
+    # swap sp and sscratch
     csrrw sp, sscratch, sp
     # now sp->kernel stack, sscratch->user stack
     # allocate a TrapContext on kernel stack
     addi sp, sp, -34*8
     # save general-purpose registers
+    # sd = Store Doubleword  
+    # this means store the value of x1 register to the address in sp + 1 * 8
     sd x1, 1*8(sp)
     # skip sp(x2), we will save it later
     sd x3, 3*8(sp)
     # skip tp(x4), application does not use it
     # save x5~x31
     .set n, 5
+    // rept 27 = repeat 27 times
     .rept 27
         SAVE_GP %n
         .set n, n+1

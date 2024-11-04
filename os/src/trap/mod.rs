@@ -13,9 +13,10 @@
 //! to [`syscall()`].
 
 mod context;
-
-use crate::syscall::syscall;
-use crate::task::{exit_current_and_run_next, suspend_current_and_run_next};
+// modiofied: add #[allow(unused_imports)]
+#[allow(unused_imports)]
+use crate::syscall::{self, syscall};
+use crate::task::{exit_current_and_run_next, suspend_current_and_run_next,update_task_info};
 use crate::timer::set_next_trigger;
 use core::arch::global_asm;
 use riscv::register::{
@@ -23,7 +24,6 @@ use riscv::register::{
     scause::{self, Exception, Interrupt, Trap},
     sie, stval, stvec,
 };
-
 global_asm!(include_str!("trap.S"));
 
 /// Initialize trap handling
@@ -43,9 +43,17 @@ pub fn enable_timer_interrupt() {
     }
 }
 
+
+
 /// trap handler
 #[no_mangle]
 pub fn trap_handler(cx: &mut TrapContext) -> &mut TrapContext {
+
+    // modified: add update_task_info
+    let syscall_id = cx.x[17];
+    //println!("[kernel debug] in src/trap/mod.rs trap_handler syscall_id: {}", syscall_id);
+    update_task_info(syscall_id);
+
     let scause = scause::read(); // get trap cause
     let stval = stval::read(); // get extra value
                                // trace!("into {:?}", scause.cause());

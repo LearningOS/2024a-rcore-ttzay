@@ -17,6 +17,7 @@ mod task;
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::syscall::process::TaskInfo;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -54,6 +55,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            task_info: TaskInfo::new(),
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -125,6 +127,10 @@ impl TaskManager {
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
+            let time = crate::timer::get_time_ms();
+            if inner.tasks[current].task_info.get_time() == 0 {
+                inner.tasks[current].task_info.record_firt_time(time);
+            } 
             drop(inner);
             // before this, we should drop local variables that must be dropped manually
             unsafe {
@@ -135,11 +141,35 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+    // MODIFIED: add get_current_task
+    fn update_task_info(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        //println!("[kernel debug] in src/task/mod.rs, update_task_info, syscall_id: {}", syscall_id);
+        inner.tasks[current].task_info.plus_times(syscall_id);
+    }
+    // MODIFIED  get inmut ref of current task info
+    fn get_task_info(&self) -> TaskInfo {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_info
+    }
+    
 }
 
+// MODIFIED: add get_current_task
 /// Run the first task in task list.
 pub fn run_first_task() {
     TASK_MANAGER.run_first_task();
+}
+
+/// Update the task information of current `Running` task.
+pub fn update_task_info(syscall_id: usize) {
+    TASK_MANAGER.update_task_info(syscall_id);
+}
+/// Get the task information of current `Running` task.
+pub fn get_task_info() -> TaskInfo {
+    TASK_MANAGER.get_task_info().clone()
 }
 
 /// Switch current `Running` task to the task we have found,

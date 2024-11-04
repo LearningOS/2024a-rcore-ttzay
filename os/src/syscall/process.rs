@@ -5,22 +5,50 @@ use crate::{
     timer::get_time_us,
 };
 
+/// TimeVal struct for get_time syscall
 #[repr(C)]
 #[derive(Debug)]
 pub struct TimeVal {
+    /// second
     pub sec: usize,
+    /// microsecond
     pub usec: usize,
 }
 
 /// Task information
 #[allow(dead_code)]
+#[derive(Debug, Copy,Clone)]
 pub struct TaskInfo {
     /// Task status in it's life cycle
     status: TaskStatus,
     /// The numbers of syscall called by task
     syscall_times: [u32; MAX_SYSCALL_NUM],
     /// Total running time of task
-    time: usize,
+    time: usize, // ms
+}
+
+
+impl TaskInfo {
+    /// Create a new TaskInfo
+    pub fn new() -> Self {
+        TaskInfo {
+            status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+            time: 0,
+        }
+    }
+    /// plus times of syscall
+    pub fn plus_times(&mut self, syscall_id: usize) {
+        self.syscall_times[syscall_id] += 1;
+    }
+    /// record the first time
+    pub fn record_firt_time(&mut self, time: usize) {
+        self.time = time;
+    }
+    /// get time
+    pub fn get_time(&self) -> usize {
+        self.time
+    }
 }
 
 /// task exits and submit an exit code
@@ -51,7 +79,16 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info");
-    -1
+    let task_info = crate::task::get_task_info();
+    let time_interval = crate::timer::get_time_ms() - task_info.get_time();
+    unsafe {
+        *ti = TaskInfo {
+            status: task_info.status,
+            syscall_times: task_info.syscall_times,
+            time: time_interval,
+        };
+    }
+    0
 }
