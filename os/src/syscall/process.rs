@@ -85,7 +85,7 @@ pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     let time_interval = crate::timer::get_time_ms() - task_info.get_time();
     unsafe {
         *ti = TaskInfo {
-            status: task_info.status,
+            status: TaskStatus::Running,
             syscall_times: task_info.syscall_times,
             time: time_interval,
         };
