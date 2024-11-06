@@ -1,9 +1,8 @@
 //! Process management syscalls
 use crate::{
-    config::MAX_SYSCALL_NUM,
-    task::{
-        change_program_brk, exit_current_and_run_next, suspend_current_and_run_next, TaskStatus,
-    },
+    config::{MAX_SYSCALL_NUM, MEMORY_END, PAGE_SIZE}, mm::{translated_byte_buffer, MapPermission, VPNRange, VirtAddr}, task::{
+        change_program_brk, create_new_maparea, current_user_token, exit_current_and_run_next, get_run_time, get_task_syscall_times, get_vpn_pte, suspend_current_and_run_next, unmap_maparea, TaskStatus
+    }, timer::get_time_us
 };
 
 #[repr(C)]
@@ -41,29 +40,102 @@ pub fn sys_yield() -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!("kernel: sys_get_time");
-    -1
+    let us = get_time_us();
+    let time_val = TimeVal{
+        sec: us / 1_000_000,
+        usec: us % 1_000_000,
+    };
+    let dst_vec = translated_byte_buffer(
+        current_user_token(), 
+        ts as * const u8, 
+        core::mem::size_of::<TimeVal>()
+    );
+    let ptr = &time_val as *const TimeVal;
+    for (index , dst) in dst_vec.into_iter().enumerate() {
+        let unit_len = dst.len();
+        unsafe {
+            dst.copy_from_slice(
+                core::slice::from_raw_parts(
+                    ptr.add(index * unit_len) as *const u8,
+                    unit_len
+                )
+            );
+        }
+    }
+    0
 }
 
 /// YOUR JOB: Finish sys_task_info to pass testcases
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TaskInfo`] is splitted by two pages ?
-pub fn sys_task_info(_ti: *mut TaskInfo) -> isize {
+pub fn sys_task_info(ti: *mut TaskInfo) -> isize {
     trace!("kernel: sys_task_info NOT IMPLEMENTED YET!");
-    -1
+    let sys_status = TaskStatus::Running;
+    let syscall_times = *get_task_syscall_times();
+    let time = get_run_time();
+    if time == 0 { return -1; }
+    let task_info = TaskInfo {
+        status: sys_status,
+        syscall_times,
+        time,
+    };
+    let dst_vec = translated_byte_buffer(
+        current_user_token(), 
+        ti as *const u8, 
+        core::mem::size_of::<TaskInfo>()
+    );
+    let ptr = &task_info as *const TaskInfo;
+    for( index, dst ) in dst_vec.into_iter().enumerate() {
+        let unit_len = dst.len();
+        unsafe {
+            dst.copy_from_slice(
+                core::slice::from_raw_parts(
+                    ptr.add(index * unit_len) as *const u8,
+                    unit_len
+                )
+            );
+        }
+    }
+
+    0
 }
 
 // YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(start: usize, len: usize, port: usize) -> isize {
+    trace!("kernel: sys_mmap has IMPLEMENTED");
+    println!("mmap: start: {:#x}, len: {:#x}, port: {:#x}", start, len, port);
+    if start % PAGE_SIZE != 0 || port & !0x7 != 0 || port & 0x7 == 0 || start >= MEMORY_END {
+        return -1;
+    }
+    let va_start = VirtAddr::from(start).floor();
+    let va_end = VirtAddr::from(start + len).ceil();
+    println!("mmap: start: {:#x}, len: {:#x}, port: {:#x}", start, len, port);
+    println!("va_start: {:#x}, va_end: {:#x}", va_start.0, va_end.0);
+    let vpnrange = VPNRange::new(va_start, va_end);
+    for vpn in vpnrange {
+        if let Some(pte) = get_vpn_pte(vpn) {
+            if pte.is_valid() {
+                return -1;
+            }
+        }
+    }
+    create_new_maparea(
+        va_start.into(),
+        va_end.into(),
+        MapPermission::from_bits_truncate((port<<1)as u8)
+    );
+    0
 }
 
 // YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+    if start % PAGE_SIZE != 0 || start >= MEMORY_END {
+        return -1;
+    }
+    unmap_maparea(start,len)
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {
